@@ -1,0 +1,18 @@
+{
+    "destination": {
+        "drivername": "",
+        "username": "",
+        "password": "",
+        "host": "",
+        "port": "",
+        "database": ""
+    },
+    "origin": {
+        "drivername": "",
+        "username": "",
+        "password": "",
+        "host": "",
+        "port": "",
+        "database": ""
+    }
+}
