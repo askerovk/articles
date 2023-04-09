@@ -44,7 +44,6 @@ class DuplicateSchema():
 
         Returns:
             None (NoneType)
-
         """
         LOGGER.info("Creating the %s schema.", schema_name)
         with self.destination_engine.connect() as con:
@@ -65,7 +64,6 @@ class DuplicateSchema():
 
         Returns:
             None (NoneType)
-
         """
         table = self.origin_engine_meta.tables[table_name]
 
