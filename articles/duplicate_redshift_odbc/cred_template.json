@@ -1,6 +1,6 @@
 {
     "destination": {
-        "drivername": "",
+        "drivername": "redshift+psycopg2",
         "username": "",
         "password": "",
         "host": "",
@@ -8,7 +8,7 @@
         "database": ""
     },
     "origin": {
-        "drivername": "",
+        "drivername": "redshift+psycopg2",
         "username": "",
         "password": "",
         "host": "",

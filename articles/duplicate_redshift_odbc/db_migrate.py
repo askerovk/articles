@@ -17,6 +17,24 @@ class DuplicateSchema():
         # Schema tracker variable for _meta_refresch method.
         self.previous_schema = ''
 
+    def _run_sql_query(self, con, query_template, *args):
+        """Run a single SQL query, fill in arguments where needed.
+
+        Args:
+            con (sqlalchemy connection):
+            query_template(string): template for a SQL query.
+            args(string): arguments to fill in the SQL query.
+
+        Returns:
+            result (sqlalchemy cursor)
+        """
+        query = query_template.format(args)
+
+        result = con.execute(query)
+
+        return result
+
+
     def _meta_refresh(self, schema_name):
         """Refresh origin db metadata, when necessary.
 
@@ -46,8 +64,14 @@ class DuplicateSchema():
             None (NoneType)
         """
         LOGGER.info("Creating the %s schema.", schema_name)
-        with self.destination_engine.connect() as con:
-            con.execute('CREATE SCHEMA IF NOT EXISTS {};'.format(schema_name))
+        
+        con =  self.destination_engine.connect()
+        
+        query_template = 'CREATE SCHEMA IF NOT EXISTS {schema_name};'
+
+        self._run_sql_query(con, query_template, schema_name)
+
+        con.close()
 
         return None
 
@@ -121,7 +145,6 @@ class DuplicateSchema():
 
         Returns:
             None (NoneType)
-
         """
         self._meta_refresh(schema_name)
 
@@ -130,6 +153,103 @@ class DuplicateSchema():
         self.create_all_tables(schema_name)
 
         return None
+    
+    def get_column_names_types(self, schema_name, table_name):
+        """Retrieve a list of column names and data type for a single table.
+
+        Psycopg2 cannot retrieve metadata from external tables. This function circumvents that
+        limitation, by building and executing the query manually.
+
+        Args:
+            schema_name (str): Name of the schema in destination database.
+            table_name (str): Name of the table in destination database.
+
+        Returns:
+            col_name_type (list of tuples): each tuple has a column name and data type.
+        """
+        con = self.origin_engine.connect()
+
+        # Get a list of column names and data types for a giiven table.
+        query_1_template = """
+            SELECT
+                columnname,
+                external_type
+            FROM
+                SVV_EXTERNAL_COLUMNS
+            WHERE
+                schemaname={schema_name},
+                tablename={table_name}
+        """
+        result = self._run_sql_query(
+            con,
+            query_1_template,
+            schema_name,
+            table_name
+        )
+
+        col_name_type = [' '.join(x) for x in result]
+
+        con.close()
+
+        return col_name_type
+
+    def create_external_table(self, schema_name, table_name):
+        """Creates a table in destination db.
+
+        Psycopg2 cannot retrieve metadata from external tables. This function circumvents that
+        limitation, by building and executing the query manually.
+
+        Args:
+            schema_name (str): Name of the schema in destination database.
+            table_name (str): Name of the table in destination database.
+
+        Returns:
+            None (NoneType)
+        """
+        con = self.destination_engine.connect()
+
+        col_name_type = self.get_column_names_types(schema_name, table_name)
+        
+        columns = ', '.join(col_name_type)
+        
+        query_2_template = "CREATE TABLE {table_name} ({columns})"
+
+        self._run_sql_query(
+            con,
+            query_2_template,
+            table_name,
+            columns
+        )
+
+        con.close()
+        
+        return None
+
+    def create_external_schema(self, schema_name):
+        """Creates a schema and all tables in destiantion db.
+
+        Args:
+            schema_name (str): Name of the schema in destination database.
+
+        Returns:
+            None (NoneType)
+        """
+        self.setup_schema(schema_name)
+
+        # Get a list of external table names in schema.
+        con = self.origin_engine.connect()
+        
+        query_template = "SELECT tablename FROM SVV_EXTERNAL_TABLES WHERE schemaname={schema_name}"
+
+        result = self._run_sql_query(con, query_template, schema_name)
+
+        con.close()
+
+        table_names = [x[0] for x in result]
+
+        # Create each table in destination db.
+        for table_name in table_names:
+            self.create_external_table(schema_name, table_name)
 
 
 class SampleData(DuplicateSchema):
@@ -142,10 +262,11 @@ class SampleData(DuplicateSchema):
         self.odbc_connection = connect(**odbc_engine)
         self.previous_schema = ''
 
-    def _get_data_sample(self, table_name, sample_size):
+    def _get_data_sample(self, schema_name, table_name, sample_size):
         """Fetch a sample of rows from a single table in origin db.
 
         Args:
+            schema_name (str): Name of the schema in destination database.
             table_name (str): Name of the table in destination database.
             sample_size (int): Number of rows to be sampled from said table.
 
@@ -154,11 +275,12 @@ class SampleData(DuplicateSchema):
         """
         LOGGER.info("Fetch data sample from %s table.", table_name)
 
-        table = self.origin_engine_meta.tables[table_name]
+        with self.destination_engine.connect() as con:
+            query = "SELECT * FROM {schema_name}.{table_name} LIMIT {sample_size}"
 
-        cursor = table.select().limit(sample_size).execute()
+            result = con.execute(query.format(schema_name, table_name, sample_size))
 
-        rows = cursor.fetchall()
+            rows = list(result)
 
         return rows
 
@@ -241,7 +363,7 @@ class SampleData(DuplicateSchema):
 
         self._meta_refresh(schema_name)
 
-        rows = self._get_data_sample(table_name, sample_size)
+        rows = self._get_data_sample(schema_name, table_name, sample_size)
 
         # Do nothing if the origin table has no rows.
         if len(rows) == 0:
