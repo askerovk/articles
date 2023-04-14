@@ -17,24 +17,6 @@ class DuplicateSchema():
         # Schema tracker variable for _meta_refresch method.
         self.previous_schema = ''
 
-    def _run_sql_query(self, con, query_template, *args):
-        """Run a single SQL query, fill in arguments where needed.
-
-        Args:
-            con (sqlalchemy connection):
-            query_template(string): template for a SQL query.
-            args(string): arguments to fill in the SQL query.
-
-        Returns:
-            result (sqlalchemy cursor)
-        """
-        query = query_template.format(args)
-
-        result = con.execute(query)
-
-        return result
-
-
     def _meta_refresh(self, schema_name):
         """Refresh origin db metadata, when necessary.
 
@@ -64,14 +46,12 @@ class DuplicateSchema():
             None (NoneType)
         """
         LOGGER.info("Creating the %s schema.", schema_name)
-        
-        con =  self.destination_engine.connect()
-        
-        query_template = 'CREATE SCHEMA IF NOT EXISTS {schema_name};'
 
-        self._run_sql_query(con, query_template, schema_name)
+        with self.destination_engine.connect() as con:
 
-        con.close()
+            query_template = 'CREATE SCHEMA IF NOT EXISTS {0};'
+
+            con.execute(query_template.format(schema_name))
 
         return None
 
@@ -153,7 +133,7 @@ class DuplicateSchema():
         self.create_all_tables(schema_name)
 
         return None
-    
+
     def get_column_names_types(self, schema_name, table_name):
         """Retrieve a list of column names and data type for a single table.
 
@@ -167,29 +147,23 @@ class DuplicateSchema():
         Returns:
             col_name_type (list of tuples): each tuple has a column name and data type.
         """
-        con = self.origin_engine.connect()
-
         # Get a list of column names and data types for a giiven table.
-        query_1_template = """
+        query = """
             SELECT
                 columnname,
                 external_type
             FROM
                 SVV_EXTERNAL_COLUMNS
             WHERE
-                schemaname={schema_name},
-                tablename={table_name}
-        """
-        result = self._run_sql_query(
-            con,
-            query_1_template,
-            schema_name,
-            table_name
-        )
+                schemaname='{0}'
+            AND
+                tablename='{1}'
+        """.format(schema_name, table_name)
+
+        with self.origin_engine.connect() as con:
+            result = con.execute(query)
 
         col_name_type = [' '.join(x) for x in result]
-
-        con.close()
 
         return col_name_type
 
@@ -206,23 +180,19 @@ class DuplicateSchema():
         Returns:
             None (NoneType)
         """
-        con = self.destination_engine.connect()
+        LOGGER.info("Creating the %s table.", table_name)
 
         col_name_type = self.get_column_names_types(schema_name, table_name)
-        
+
         columns = ', '.join(col_name_type)
-        
-        query_2_template = "CREATE TABLE {table_name} ({columns})"
 
-        self._run_sql_query(
-            con,
-            query_2_template,
-            table_name,
-            columns
-        )
+        query = "CREATE TABLE IF NOT EXISTS {0}.{1} ({2})".format(schema_name, table_name, columns)
 
-        con.close()
-        
+        con = self.destination_engine.connect()
+
+        with self.destination_engine.connect() as con:
+            con.execute(query)
+
         return None
 
     def create_external_schema(self, schema_name):
@@ -237,13 +207,17 @@ class DuplicateSchema():
         self.setup_schema(schema_name)
 
         # Get a list of external table names in schema.
-        con = self.origin_engine.connect()
-        
-        query_template = "SELECT tablename FROM SVV_EXTERNAL_TABLES WHERE schemaname={schema_name}"
+        query = """
+            SELECT
+                tablename
+            FROM
+                SVV_EXTERNAL_TABLES
+            WHERE
+                schemaname='{0}'
+            """.format(schema_name)
 
-        result = self._run_sql_query(con, query_template, schema_name)
-
-        con.close()
+        with self.origin_engine.connect() as con:
+            result = con.execute(query)
 
         table_names = [x[0] for x in result]
 
@@ -252,7 +226,7 @@ class DuplicateSchema():
             self.create_external_table(schema_name, table_name)
 
 
-class SampleData(DuplicateSchema):
+class SampleData():
     """Populate newly duplicated tables in new db with sample data from origin db."""
     def __init__(self, origin_engine, destination_engine, odbc_engine):
         self.origin_engine = origin_engine
@@ -261,6 +235,26 @@ class SampleData(DuplicateSchema):
         self.destination_engine_meta = MetaData(bind=destination_engine)
         self.odbc_connection = connect(**odbc_engine)
         self.previous_schema = ''
+
+    def _meta_refresh(self, schema_name):
+        """Refresh destination db metadata, when necessary.
+
+        The relfect() method takes a while to run. This function makes sure
+        that it only runs when users switch to new Redshift schema.
+
+        Args:
+            schema_name (str): Name of the schema in destination database.
+
+        Returns:
+            None (NoneType)
+        """
+        if self.previous_schema != schema_name:
+            LOGGER.info("Set sqlalchemy meta schema to %s.", schema_name)
+            self.destination_engine_meta.clear()
+            self.destination_engine_meta.reflect(schema=schema_name)
+            self.previous_schema = schema_name
+
+        return None
 
     def _get_data_sample(self, schema_name, table_name, sample_size):
         """Fetch a sample of rows from a single table in origin db.
@@ -274,13 +268,16 @@ class SampleData(DuplicateSchema):
             rows (list): a list of rows from the table.
         """
         LOGGER.info("Fetch data sample from %s table.", table_name)
+        
+        query = "SELECT * FROM {0} LIMIT {1}".format(
+                    table_name,
+                    sample_size
+                )
 
-        with self.destination_engine.connect() as con:
-            query = "SELECT * FROM {schema_name}.{table_name} LIMIT {sample_size}"
+        with self.origin_engine.connect() as con:
+            result = con.execute(query)
 
-            result = con.execute(query.format(schema_name, table_name, sample_size))
-
-            rows = list(result)
+        rows = list(result)
 
         return rows
 
@@ -315,7 +312,7 @@ class SampleData(DuplicateSchema):
 
         return insert_query, list_of_tuples
 
-    def _odbc_data_types(self, table_name):
+    def _odbc_data_types(self, schema_name, table_name):
         """Overwrite pyodbc character limit on VARCHAR.
 
         There is a well known issue with pyodbc module, which happens
@@ -334,7 +331,7 @@ class SampleData(DuplicateSchema):
         """
         LOGGER.info("Generate data types for the %s table.", table_name)
 
-        columns = self.origin_engine_meta.tables[table_name].columns
+        columns = self.destination_engine_meta.tables[table_name].columns
 
         # Generate a list of None values. If there are no large VARCHAR columns
         # the cursor will use its defaults.
@@ -372,7 +369,7 @@ class SampleData(DuplicateSchema):
         else:
             insert_query, list_of_tuples = self._odbc_executemany_args(table_name, rows)
 
-            data_types = self._odbc_data_types(table_name)
+            data_types = self._odbc_data_types(schema_name, table_name)
 
             cursor = self.odbc_connection.cursor()
             # Here, the list of typles is used to overwrite certain column data types.
@@ -399,7 +396,7 @@ class SampleData(DuplicateSchema):
 
         self._meta_refresh(schema_name)
 
-        table_names = list(self.origin_engine_meta.tables.keys())
+        table_names = list(self.destination_engine_meta.tables.keys())
 
         for table in table_names:
             self.populate_1_table(schema_name, table, sample_size)

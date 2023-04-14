@@ -1,7 +1,7 @@
 """Miscellaneous utility functions."""
 
 import logging
-
+from os import path
 
 def get_logger(name):
     """Generate a logger with a given name.
