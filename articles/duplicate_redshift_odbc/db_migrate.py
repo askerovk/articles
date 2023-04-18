@@ -283,6 +283,7 @@ class SampleData():
 
     def _odbc_executemany_args(self, table_name, rows):
         """Generate inputs for the ODBC insert query.
+        
         The query needs to have as many question marks as variables in the data sample.
         Each row of variables must be a tuple in a list.
 
@@ -312,7 +313,7 @@ class SampleData():
 
         return insert_query, list_of_tuples
 
-    def _odbc_data_types(self, schema_name, table_name):
+    def _odbc_data_types(self, table_name):
         """Overwrite pyodbc character limit on VARCHAR.
 
         There is a well known issue with pyodbc module, which happens
@@ -348,6 +349,7 @@ class SampleData():
 
     def populate_1_table(self, schema_name, table_name, sample_size):
         """Fetch a data sample and insert it into a single destiontion table.
+        
         Args:
             schema_name (str): Name of the schema in destination database.
             table_name (str): Name of the table in destination database.
@@ -385,6 +387,7 @@ class SampleData():
 
     def populate_all_tables(self, schema_name, sample_size):
         """Populate all tables in a given destination schema with sample data.
+        
         Args:
             schema_name (str): Name of the schema in destination database.
             sample_size (int): Number of rows to be sampled from said table.
