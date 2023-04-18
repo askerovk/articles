@@ -1,4 +1,3 @@
 ## Duplicating a Redshift database using ODBC.
 
-The [article](INSERT LINK WHEN PUBLISHED) outlines the code I have written to create a duplicate redshift database and populate its tables with sample data from the source, using the ODBC driver. This would come in handy, if you need to quickly create a staging setup for a production ETL.
-
+The [part 1](https://medium.com/@askerovk/duplicating-a-redshift-database-using-odbc-part-1-579124405f01?source=friends_link&sk=eefb339f4257fd9690e855c10b151e3a) and [part 2](https://medium.com/@askerovk/duplicating-a-redshift-database-using-odbc-part-2-ed023d5395d6?source=friends_link&sk=d79314fc300e517060eb77515ab8583b) of the article outline the code I have written to create a duplicate redshift database and populate its tables with sample data from the source, using the ODBC driver. This would come in handy, if you need to quickly create a staging setup to develop/extend an ETL dealing with production data.
